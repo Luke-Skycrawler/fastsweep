@@ -32,6 +32,6 @@ endif()
 
 
 # Add test executables
-add_executable(tests tests/test1.cpp ${HEADERS} ${SOURCES} ${cuda_SOURCE})  # Add your test source files
-target_link_libraries(tests PRIVATE Eigen3::Eigen)
+add_executable(test1 tests/test1.cpp ${HEADERS} ${SOURCES} ${cuda_SOURCE})  # Add your test source files
+target_link_libraries(test1 PRIVATE Eigen3::Eigen pybind11::module)
 
