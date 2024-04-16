@@ -36,7 +36,7 @@ class CMakeBuild(build_ext):
 
         debug = int(os.environ.get("DEBUG", 0)) if self.debug is None else self.debug
         cfg = "Debug" if debug else "Release"
-        vcpkg_prefix_path = "C:/vcpkg/vcpkg/" + "scripts/buildsystems/vcpkg.cmake"
+        vcpkg_prefix_path = "D:/vcpkg/" + "scripts/buildsystems/vcpkg.cmake"
 
         # CMake lets you override the generator - we need to check this.
         # Can be set with Conda-Build, for example.

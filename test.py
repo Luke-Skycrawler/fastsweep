@@ -7,7 +7,7 @@ from drjit.cuda import TensorXf
 import fastsweep 
 def show(fig, phi):
     from matplotlib import colors
-    divnorm = colors.TwoSlopeNorm(vmin=-0.5, vcenter=0.0, vmax=0.5)
+    divnorm = colors.TwoSlopeNorm(vmin=-0.005, vcenter=0.0, vmax=0.005)
     img = fig.imshow(phi.T, origin="lower", animated=True,
                         cmap='PiYG', norm=divnorm)  # , interpolation="antialiased")
     phinp = phi
@@ -23,17 +23,20 @@ def test():
     phi[:] = 1.0 * scale
     phi[:, : res // 2, :] = -1.0 * scale
     # r.redistance_3d(phi, h, 0)
-
     init = phi.copy()
-    init_ = TensorXf(init)
+
+
+    start = time.time()
+    phi = r.redistance_rb(phi, h, 1)
+    end = time.time()
+
     start_0 = time.time()
-    ref = fastsweep.redistance(init_).numpy()
+    # init_ = TensorXf(init)
+    # ref = fastsweep.redistance(init_).numpy()
+    ref = r.redistance_3d(init, h, 1)
     end_0 = time.time()
     
     
-    start = time.time()
-    phi = r.redistance_3d(phi, h, 1)
-    end = time.time()
     fig, (ax1, ax2) = plt.subplots(1, 2)
     err = ref - phi
     print(f"max error = {np.max(np.abs(err))}")

@@ -51,16 +51,27 @@ using namespace cuda;
         bool is_boundary = i == 0 || i == res - 1 || j == 0 || j == res - 1 || k == 0 || k == res - 1;
         if (!(fabs(phi[IJK(i, j, k, shape)]) < h || is_boundary)) {
             float phii = phi[IJK(i - incx, j, k, shape)];
+            float phiii = phi[IJK(i + incx, j, k, shape)];
+            
             float phij = phi[IJK(i, j - incy, k, shape)];
+            float phijj = phi[IJK(i, j + incy, k, shape)];
+
             float phik = phi[IJK(i, j, k - incz, shape)];
+            float phikk = phi[IJK(i, j, k + incz, shape)];
 
             float sgn = 1.0f;   
+            
             if (phii < 0.0f) {
-                phii = -phii;
-                phij = -phij;
-                phik = -phik;
+                phii = -fmaxf(phii, phiii);
+                phij = -fmaxf(phij, phijj);
+                phik = -fmaxf(phik, phikk);
                 sgn = -1.0f;
+            } else {
+                phii = fminf(phii, phiii);
+                phij = fminf(phij, phijj);
+                phik = fminf(phik, phikk);
             }
+            
 
             float phi0 = fminf(fminf(phii, phij), phik);
             float phi2 = fmaxf(fmaxf(phii, phij), phik);
@@ -236,7 +247,24 @@ using namespace cuda;
             }
         }
     }
+    static const int level_max = 30;
 
+
+    __global__ void _sweep_rb(float *phi, dim3 shape, int incx, int incy, int incz, float h, int odd) {
+        // int res = shape.x;
+        // int tid = blockIdx.x * blockDim.x + threadIdx.x;
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        int j = blockIdx.y * blockDim.y + threadIdx.y;
+        int k = blockIdx.z * blockDim.z + threadIdx.z;
+
+
+        if ((i + j + k) % 2 == odd) {
+            if (i < shape.x && j < shape.y && k < shape.z) {
+                update_3d(phi, shape, incx, incy, incz, h, i, j, k);
+            }
+
+        }
+    }
     __global__ void _sweep_3d(float *phi, dim3 shape, int incx, int incy, int incz, float h) {
         int res = shape.x;
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -260,6 +288,26 @@ using namespace cuda;
             __syncthreads();
         }
     }
+
+    __global__ void _sweep_parallel(float *phi, dim3 shape, int incx, int incy, int incz, float h, int level) {
+        int tid = blockIdx.x * blockDim.x + threadIdx.x;
+        int n_tasks = shape.x * shape.y; 
+        int n_threads = gridDim.x * blockDim.x;
+        int n_tasks_per_thread = (n_tasks + n_threads - 1) / n_threads;
+        
+        for (int t = 0; t < n_tasks_per_thread; t ++) {
+            int task_id = tid * n_tasks_per_thread + t;
+            int __j = task_id % shape.x + 1;
+            int __i = task_id / shape.x + 1;
+            int _k = level - __i - __j - 1;
+            if (_k >= 0 && _k < shape.z) {
+                int _i = __i - 1;
+                int _j = __j - 1;
+                update_3d(phi, shape, incx, incy, incz, h, _i, _j, _k);
+            }
+        }
+    }
+
     __global__ void _sweep(float *phi, dim3 shape, int incx, int incy, float h) {
         int res = shape.x;
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -311,24 +359,77 @@ using namespace cuda;
         }
     }
 
+    // void sweep_3d(float *phi, int nx, int ny, int nz, float h) {
+    //     dim3 block(1, 1);
+    //     dim3 grid(256);
+    //     dim3 shape(nx, ny, nz);
+    //     for (int i = 0; i < 2; i ++) {
+            
+    //         _sweep_3d<<<block, grid>>>(phi, shape, 1, 1, -1, h);
+    //         _sweep_3d<<<block, grid>>>(phi, shape, -1, 1, -1, h);
+    //         _sweep_3d<<<block, grid>>>(phi, shape, -1, -1, -1, h);
+    //         _sweep_3d<<<block, grid>>>(phi, shape, 1, -1, -1, h);
+
+    //         _sweep_3d<<<block, grid>>>(phi, shape, 1, 1, 1, h);
+    //         _sweep_3d<<<block, grid>>>(phi, shape, -1, 1, 1, h);
+    //         _sweep_3d<<<block, grid>>>(phi, shape, -1, -1, 1, h);
+    //         _sweep_3d<<<block, grid>>>(phi, shape, 1, -1, 1, h);
+    //     }
+    // }
     void sweep_3d(float *phi, int nx, int ny, int nz, float h) {
-        dim3 block(1, 1);
+        dim3 block(64);
         dim3 grid(256);
         dim3 shape(nx, ny, nz);
+        const auto sw = [&](int incx, int incy, int incz) {
+            for (int level = 3; level < nx * 3 + 1; level ++) {
+                _sweep_parallel<<<block, grid>>>(phi, shape, incx, incy, incz, h, level);                
+            }
+        };
         for (int i = 0; i < 2; i ++) {
-            
-            _sweep_3d<<<block, grid>>>(phi, shape, 1, 1, -1, h);
-            _sweep_3d<<<block, grid>>>(phi, shape, -1, 1, -1, h);
-            _sweep_3d<<<block, grid>>>(phi, shape, -1, -1, -1, h);
-            _sweep_3d<<<block, grid>>>(phi, shape, 1, -1, -1, h);
 
-            _sweep_3d<<<block, grid>>>(phi, shape, 1, 1, 1, h);
-            _sweep_3d<<<block, grid>>>(phi, shape, -1, 1, 1, h);
-            _sweep_3d<<<block, grid>>>(phi, shape, -1, -1, 1, h);
-            _sweep_3d<<<block, grid>>>(phi, shape, 1, -1, 1, h);
+            sw(1, 1, -1);
+            sw(-1, 1, -1);
+            sw(-1, -1, -1);
+            sw(1, -1, -1);
+
+            sw(1, 1, 1);
+            sw(-1, 1, 1);
+            sw(-1, -1, 1);
+            sw(1, -1, 1);
+            // _sweep_3d<<<block, grid>>>(phi, shape, 1, 1, -1, h);
+            // _sweep_3d<<<block, grid>>>(phi, shape, -1, 1, -1, h);
+            // _sweep_3d<<<block, grid>>>(phi, shape, -1, -1, -1, h);
+            // _sweep_3d<<<block, grid>>>(phi, shape, 1, -1, -1, h);
+
+            // _sweep_3d<<<block, grid>>>(phi, shape, 1, 1, 1, h);
+            // _sweep_3d<<<block, grid>>>(phi, shape, -1, 1, 1, h);
+            // _sweep_3d<<<block, grid>>>(phi, shape, -1, -1, 1, h);
+            // _sweep_3d<<<block, grid>>>(phi, shape, 1, -1, 1, h);
         }
     }
+    void sweep_rb(float *phi, int nx, int ny, int nz, float h) {
+        dim3 block(nx / 4, ny / 4, nz / 4);
+        dim3 grid(4, 4, 4);
+        dim3 shape(nx, ny, nz);
+        const auto sw = [&](int ix, int iy, int iz) {
+            for (int _i = 0; _i < 2; _i ++) {
+                _sweep_rb<<<block, grid>>>(phi, shape, ix, iy, iz, h, _i % 2);
+            }
+        };
+        
+        for (int i = 0; i < 1; i ++) {
+            sw(1, 1, -1);
+            sw(-1, 1, -1);
+            sw(-1, -1, -1);
+            sw(1, -1, -1);
 
+            // sw(1, 1, 1);
+            // sw(-1, 1, 1);
+            // sw(-1, -1, 1);
+            // sw(1, -1, 1);
+        }
+        
+    }
     float *init_cuda_memory(int shapex, int shapey, int shapez = 1) {
         float *p;
         cudaMallocManaged(&p, sizeof(float) * shapex * shapey * shapez);
@@ -369,5 +470,13 @@ using namespace cuda;
         fetch_memory_3d(phi_np, p, shapex, shapey, shapez);
         gpuErrchk(cudaDeviceSynchronize());
     }
-
+    void redistance_rb(float *phi_np, int shapex, int shapey, int shapez, float h, int init_boundary) {
+        static float *p = init_cuda_memory(shapex, shapey, shapez);
+        fill_memory_3d(phi_np, p, shapex, shapey, shapez);
+        init_distance_3d(p, shapex, shapey, shapez, h, init_boundary);
+        sweep_rb(p, shapex, shapey, shapez, h);
+        fetch_memory_3d(phi_np, p, shapex, shapey, shapez);
+        gpuErrchk(cudaDeviceSynchronize());
+    }
+    
 };  // namespace cuda

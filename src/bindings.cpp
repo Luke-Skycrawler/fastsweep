@@ -24,7 +24,8 @@ PYBIND11_MODULE(shaysweep, m) {
     py::class_<Redistance>(m, "Redistance")
         .def(py::init<int>())
         .def("redistance", &Redistance::redistance, py::arg("phi"), py::arg("h"), py::arg("init_boundary") = 0)
-        .def("redistance_3d", &Redistance::redistance_3d, py::arg("phi"), py::arg("h"), py::arg("init_boundary") = 0);
+        .def("redistance_3d", &Redistance::redistance_3d, py::arg("phi"), py::arg("h"), py::arg("init_boundary") = 0)
+        .def("redistance_rb", &Redistance::redistance_rb, py::arg("phi"), py::arg("h"), py::arg("init_boundary") = 0);
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
 #else
